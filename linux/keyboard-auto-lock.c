@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/utsname.h>
 
 int debug = 0;
 char last_line[1024];
@@ -108,6 +109,23 @@ int main(int argc, char* argv[])
     int *wd;
     nfds_t nfds;
     struct pollfd fds[1];
+    struct utsname uname_buffer;
+
+    if (uname(&uname_buffer) == 0) {
+#if defined(__x86_64__)
+        if (strcmp(uname_buffer.machine, "x86_64") != 0) {
+            fprintf(stderr, "Error: This application is 64-bit but your system is not 64-bit\n");
+            return 1;
+        }
+#elif defined(__i386__)
+        if (strcmp(uname_buffer.machine, "x86_64") == 0) {
+            fprintf(stderr, "Error: This application is 32-bit but your system is 64-bit\n");
+            return 1;
+        }
+#else
+        printf("Error: Unsupported platform\n");
+#endif
+    }
 
     if (getuid() != 0) {
         printf("Error: You have to run this utility as root\n");
