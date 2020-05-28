@@ -7,16 +7,55 @@
 #include <string.h>
 #include <fcntl.h>
 
+int debug = 0;
+char last_line[1024];
+
+int run_command(char *cmd)
+{
+    return (WEXITSTATUS( system(cmd) ) == 0) ? 1 : 0;
+}
+
 void lock_system()
 {
-    if (access("/usr/bin/loginctl", X_OK) == 0)
-        system("/usr/bin/loginctl lock-sessions");
-    else
-    if (access("/usr/loginctl", X_OK) == 0)
-        system("/usr/loginctl lock-sessions");
-    else
-    if (access("/usr/bin/vlock", X_OK) == 0)
-        system("/usr/bin/vlock");
+    if (run_command("loginctl lock-sessions"))
+        return;
+    if (run_command("/bin/loginctl lock-sessions"))
+        return;
+    if (run_command("vlock"))
+        return;
+    if (run_command("/usr/bin/vlock"))
+        return;
+}
+
+int is_required_dev(const char *dev)
+{
+    char cmd[1024];
+    char buf[1024];
+    FILE *fp = NULL;
+    int ret = 0;
+    char *ret_kbd;
+    char *ret_mouse;
+
+    snprintf(cmd, sizeof(cmd), "dmesg | grep \"input,%s\" | tail -n 1", dev);
+    fp = popen(cmd, "r");
+    if (fp == NULL) {
+        return 0;
+    }
+    memset(buf, 0, sizeof(buf));
+    fgets(buf, sizeof(buf), fp);
+    fclose(fp);
+
+    if (strcmp(last_line, buf) == 0) {
+        return 0;
+    }
+
+    ret_kbd = strstr(buf, "Keyboard");
+    ret_mouse = strstr(buf, "Mouse");
+    if (ret_kbd || ret_mouse) {
+        ret = 1;
+        strncpy(last_line, buf, sizeof(last_line));
+    }
+    return ret;
 }
 
 void handle_events(int fd, int *wd)
@@ -43,32 +82,20 @@ void handle_events(int fd, int *wd)
             if ((event->len) && (!(event->mask & IN_ISDIR))) {
                 int fd;
 
-                int remaining_iterations = 100;
+                if (debug)
+                    printf("Found a new entry in /dev tree: %s\n", event->name);
+
+                int remaining_iterations = 50;
                 while ( remaining_iterations > 0 ) {
-                    fd = open("/var/log/messages", O_RDONLY);
-                    if (fd > 0) {
-                        char buf[4096];
-                        char class[1024];
-                        int size = lseek(fd, 0, SEEK_END);
-                        lseek(fd, size - sizeof(buf), SEEK_SET);
-                        memset(buf, 0, sizeof(buf));
-                        size = read(fd, buf, sizeof(buf) - 1);
-                        buf[size] = 0;
-                        close(fd);
-               
-                        snprintf(class, sizeof(class), "input,%s", event->name);
-                        if ((strstr(buf, class) != NULL) && (strstr(buf, "Keyboard") != NULL)) {
-                            lock_system();
-                            break;
-                        }
-                        if ((strstr(buf, class) != NULL) && (strstr(buf, "Mouse") != NULL)) {
-                            lock_system();
-                            break;
-                        }
+                    if (is_required_dev(event->name)) {
+                        if (debug)
+                            printf("Device '%s' triggering lock\n", event->name);
+                        lock_system();
                     }
                     usleep(10000);
                     remaining_iterations--;
                 }
+
             }
         }
     }
@@ -87,11 +114,18 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    if ((argc > 1) && (strcmp(argv[1], "--debug") == 0)) {
+        debug = 1;
+    }
+
     fd = inotify_init1(IN_NONBLOCK);
     if (fd == -1) {
         perror("inotify_init1");
         exit(EXIT_FAILURE);
     }
+
+    if (debug)
+        printf("iNotify handler initialized\n");
 
     wd = calloc(argc, sizeof(int));
     if (wd == NULL) {
@@ -106,12 +140,17 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
+    if (debug)
+        printf("iNotify watcher on /dev established\n");
+
     nfds = 1;
 
     fds[0].fd = fd;
     fds[0].events = POLLIN;
 
-    printf("Listening for events.\n");
+    if (debug)
+        printf("Listening for events.\n");
+
     while (1) {
         poll_num = poll(fds, nfds, -1);
         if (poll_num == -1) {
@@ -128,7 +167,8 @@ int main(int argc, char* argv[])
         }
     }
 
-    printf("Done.\n");
+    if (debug)
+        printf("Done.\n");
 
     close(fd);
 
