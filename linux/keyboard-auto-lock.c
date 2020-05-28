@@ -12,6 +12,9 @@ void lock_system()
     if (access("/usr/bin/loginctl", X_OK) == 0)
         system("/usr/bin/loginctl lock-sessions");
     else
+    if (access("/usr/loginctl", X_OK) == 0)
+        system("/usr/loginctl lock-sessions");
+    else
     if (access("/usr/bin/vlock", X_OK) == 0)
         system("/usr/bin/vlock");
 }
@@ -39,26 +42,32 @@ void handle_events(int fd, int *wd)
             event = (const struct inotify_event *) ptr;
             if ((event->len) && (!(event->mask & IN_ISDIR))) {
                 int fd;
+
+                int remaining_iterations = 100;
+                while ( remaining_iterations > 0 ) {
+                    fd = open("/var/log/messages", O_RDONLY);
+                    if (fd > 0) {
+                        char buf[4096];
+                        char class[1024];
+                        int size = lseek(fd, 0, SEEK_END);
+                        lseek(fd, size - sizeof(buf), SEEK_SET);
+                        memset(buf, 0, sizeof(buf));
+                        size = read(fd, buf, sizeof(buf) - 1);
+                        buf[size] = 0;
+                        close(fd);
                
-                usleep(10000);
-                fd = open("/var/log/messages", O_RDONLY);
-                if (fd > 0) {
-                    char buf[512];
-                    char class[1024];
-                    int size = lseek(fd, 0, SEEK_END);
-                    lseek(fd, size - sizeof(buf), SEEK_SET);
-                    memset(buf, 0, sizeof(buf));
-                    size = read(fd, buf, sizeof(buf) - 1);
-                    buf[size] = 0;
-                    close(fd);
-               
-                    snprintf(class, sizeof(class), "input,%s", event->name);
-                    if ((strstr(buf, class) != NULL) && (strstr(buf, "Keyboard") != NULL)) {
-                        lock_system();
+                        snprintf(class, sizeof(class), "input,%s", event->name);
+                        if ((strstr(buf, class) != NULL) && (strstr(buf, "Keyboard") != NULL)) {
+                            lock_system();
+                            break;
+                        }
+                        if ((strstr(buf, class) != NULL) && (strstr(buf, "Mouse") != NULL)) {
+                            lock_system();
+                            break;
+                        }
                     }
-                    if ((strstr(buf, class) != NULL) && (strstr(buf, "Mouse") != NULL)) {
-                        lock_system();
-                    }
+                    usleep(10000);
+                    remaining_iterations--;
                 }
             }
         }
@@ -72,6 +81,11 @@ int main(int argc, char* argv[])
     int *wd;
     nfds_t nfds;
     struct pollfd fds[1];
+
+    if (getuid() != 0) {
+        printf("Error: You have to run this utility as root\n");
+        return 1;
+    }
 
     fd = inotify_init1(IN_NONBLOCK);
     if (fd == -1) {
