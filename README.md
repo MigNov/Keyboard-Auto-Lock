@@ -9,7 +9,8 @@ This prevents the BadUSB devices to control your computer.
 ## Components
 The project consists of following source directories:
 - arduino-badusb-test - a simple testing BadUSB implementation for Arduino Leonardo/Lily GO
-- linux - source code for Linux implementation of keyboard automatic locker
+- linux - source code for Linux implementation of keyboard automatic locker, developed and tested on Fedora 31/32
+-- keyboard-auto-lock.sh - bash script to use inotifywait instead
 - windows - source code for Windows implementation of keyboard automatic locker
 
 The compiled version for 32-bit and 64-bit Windows as well as 32-bit and 64-bit Linux

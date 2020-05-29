@@ -124,6 +124,7 @@ int main(int argc, char* argv[])
         }
 #else
         printf("Error: Unsupported platform\n");
+        return 1;
 #endif
     }
 
